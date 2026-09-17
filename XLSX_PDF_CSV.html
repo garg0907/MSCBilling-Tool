@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Generate CSV with XLSX Mapping</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+        background: #f7f9fc;
+        color: #333;
+    }
+    h2 {
+        color: #0a2342;
+    }
+    button {
+        background: #0a2342;
+        color: white;
+        padding: 12px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+        margin-right: 10px;
+    }
+    button:hover {
+        background: #c9a227;
+    }
+</style>
+
+</head>
+<body>
+
+<h2>CSV Generator with XLSX Mapping</h2>
+
+<button onclick="document.getElementById('fileInput').click()">Upload XLSX</button>
+<input type="file" id="fileInput" accept=".xlsx" style="display:none" onchange="handleFileUpload(event)">
+
+<button onclick="document.getElementById('invoiceInput').click()">Upload Invoice</button>
+<input type="file" id="invoiceInput" accept=".pdf" style="display:none" onchange="handleInvoiceUpload(event)">
+
+<button onclick="generateCSV()">Download CSV</button>
+
+<script>
+let invoiceNumber = "";
+let invoiceDate = "";
+let dueDate = "";
+
+//mm/dd/yyyy to dd/mm/yyyy
+function formatPDFDate(dateString) {
+    if (!dateString) return "";
+
+    const parts = dateString.split("/");
+
+    if (parts.length !== 3) {
+        return dateString;
+    }
+
+    let month = parseInt(parts[0], 10);
+    let day = parseInt(parts[1], 10);
+    let year = parseInt(parts[2], 10);
+
+    // Convert 2-digit year to 4-digit year
+    if (year < 100) {
+        year += 2000;
+    }
+
+    return (
+        String(day).padStart(2, "0") + "/" +
+        String(month).padStart(2, "0") + "/" +
+        String(year)
+    );
+}
+
+async function handleInvoiceUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = async function(e) {
+        try {
+            const typedArray = new Uint8Array(e.target.result);
+            const pdf = await pdfjsLib.getDocument(typedArray).promise;
+
+            let fullText = "";
+
+            // Read ALL pages
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(" ");
+                fullText += " " + pageText;
+            }
+
+            // Normalize PDF text
+            fullText = fullText.replace(/\s+/g, " ").trim();
+
+            console.log("PDF TEXT:", fullText);
+
+            // =========================
+            // INVOICE NUMBER
+            // =========================
+            let invoiceMatch = fullText.match(
+                /Invoice\s*(?:No\.?|Number|#)\s*[:\-]?\s*([0-9]{6,10})/i
+            );
+
+            // Fallback: any 8-digit number
+            if (!invoiceMatch) {
+                invoiceMatch = fullText.match(/\b([0-9]{8})\b/);
+            }
+
+            if (invoiceMatch && invoiceMatch[1]) {
+                invoiceNumber = invoiceMatch[1].trim();
+            } else {
+                invoiceNumber = "";
+            }
+
+            // =========================
+// FIND ALL DATES IN PDF
+// =========================
+
+const dateMatches = fullText.match(
+    /\b[0-9]{2}\/[0-9]{2}\/[0-9]{2,4}\b/g
+) || [];
+
+console.log("DATES FOUND:", dateMatches);
+
+// First date = Invoice Date
+if (dateMatches.length >= 1) {
+    invoiceDate = formatPDFDate(dateMatches[0]);
+} else {
+    invoiceDate = "";
+}
+
+// Second date = Due Date
+if (dateMatches.length >= 2) {
+    dueDate = formatPDFDate(dateMatches[1]);
+} else {
+    dueDate = "";
+}
+
+            alert(
+                "Invoice Number: " + (invoiceNumber || "Not found") +
+                "\nInvoice Date: " + (invoiceDate || "Not found") +
+                "\nDue Date: " + (dueDate || "Not found")
+            );
+
+        } catch (error) {
+            console.error("PDF error:", error);
+            alert("Error reading PDF: " + error.message);
+        }
+    };
+
+    reader.readAsArrayBuffer(file);
+}
+
+
+// =========================
+// XLSX UPLOAD
+// =========================
+
+let excelRows = [];
+
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        const json = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    cellDates: true,
+    raw: true
+});
+
+        // Store all rows starting from row 2
+        excelRows = json.slice(1);
+
+        alert("XLSX uploaded. " + excelRows.length + " rows mapped.");
+    };
+
+    reader.readAsArrayBuffer(file);
+}
+
+
+// =========================
+// EXCEL DATE FORMAT
+// =========================
+
+function formatExcelDate(value) {
+    if (value === undefined || value === null || value === "") {
+        return "";
+    }
+
+    // If XLSX has already returned a Date object
+    if (value instanceof Date && !isNaN(value.getTime())) {
+        const dd = String(value.getDate()).padStart(2, "0");
+        const mm = String(value.getMonth() + 1).padStart(2, "0");
+        const yyyy = value.getFullYear();
+
+        return `${dd}/${mm}/${yyyy}`;
+    }
+
+    // Excel serial number
+    if (typeof value === "number") {
+
+        // Excel dates are normally around 40000-60000
+        if (value >= 30000 && value <= 60000) {
+            const excelEpoch = new Date(1899, 11, 30);
+            const date = new Date(
+                excelEpoch.getTime() + value * 86400000
+            );
+
+            const dd = String(date.getDate()).padStart(2, "0");
+            const mm = String(date.getMonth() + 1).padStart(2, "0");
+            const yyyy = date.getFullYear();
+
+            return `${dd}/${mm}/${yyyy}`;
+        }
+
+        return value.toString();
+    }
+
+    // Handle string dates such as:
+    // 08/01/2026
+    // 8/1/2026
+    // 08-01-2026
+    const str = value.toString().trim();
+
+    const dateMatch = str.match(
+        /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/
+    );
+
+    if (dateMatch) {
+        let month = parseInt(dateMatch[1], 10);
+        let day = parseInt(dateMatch[2], 10);
+        let year = parseInt(dateMatch[3], 10);
+
+        if (year < 100) {
+            year += 2000;
+        }
+
+        return (
+            String(day).padStart(2, "0") +
+            "/" +
+            String(month).padStart(2, "0") +
+            "/" +
+            year
+        );
+    }
+
+    return str;
+}
+
+
+// =========================
+// LAST DATE OF PREVIOUS MONTH
+// =========================
+
+function getLastDateOfPreviousMonth() {
+    const today = new Date();
+
+    const firstDayCurrentMonth = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        1
+    );
+
+    const lastDayPrevMonth = new Date(
+        firstDayCurrentMonth - 1
+    );
+
+    const dd = String(lastDayPrevMonth.getDate()).padStart(2, "0");
+    const mm = String(lastDayPrevMonth.getMonth() + 1).padStart(2, "0");
+    const yyyy = lastDayPrevMonth.getFullYear();
+
+    return `${dd}/${mm}/${yyyy}`;
+}
+
+
+// =========================
+// GENERATE CSV
+// =========================
+
+function generateCSV() {
+
+    const headers = [
+        "DOC TYPE",
+        "INVOICE-NUMBER",
+        "ITEM NUMBER",
+        "MSC PO",
+        "TERMS",
+        "INVOICE-DATE",
+        "INVOICE-DUE DATE",
+        "CURRENCY",
+        "DATE/TIME IN",
+        "DATE/TIME OUT",
+        "LIFT-ON CHARGE",
+        "LIFT-OFF CHARGE",
+        "STORAGE DAYS",
+        "STORAGE RATE",
+        "STORAGE TOTAL",
+        "MONITORING DAYS",
+        "MONITORING RATE",
+        "MONITORING TOTAL",
+        "INVOICE TOTAL",
+        "EMPTY/LOADED",
+        "VESSEL",
+        "VOYAGE NUMBER",
+        "UNIQUE-SHIPMENT-ID",
+        "EQUIP-INITIAL",
+        "EQUIP-NUMBER",
+        "EQUIP-SIZE",
+        "EQUIP-TYPE",
+        "TRUCKER NAME",
+        "STATUS COMMENTS",
+        "NOTES"
+    ];
+
+    let csvContent = headers.join(",") + "\n";
+
+    let itemCounter = 1;
+
+    excelRows.forEach(row => {
+
+        const csvRow = Array(headers.length).fill("");
+
+        const containerNumber = row[0];
+
+        csvRow[0] = "INV";
+        csvRow[1] = invoiceNumber || "";
+        csvRow[2] = itemCounter;
+        csvRow[4] = "30";
+        csvRow[7] = "CAD";
+        // =========================
+        // INVOICE DATE
+        // =========================
+        csvRow[5] = invoiceDate || "";
+
+        // =========================
+        // INVOICE DUE DATE
+        // =========================
+        csvRow[6] = dueDate || "";
+
+        csvRow[19] = "EMPTY";
+
+        itemCounter++;
+
+        // =========================
+        // DATE/TIME IN
+        // =========================
+
+        let inDateRaw = row[1];
+
+if (inDateRaw === undefined || inDateRaw === null || inDateRaw === "") {
+    csvRow[8] = "";
+} else {
+    csvRow[8] = formatExcelDate(inDateRaw);
+}
+
+
+        // =========================
+        // DATE/TIME OUT
+        // =========================
+
+        let outDateRaw = row[2];
+
+        if (
+            outDateRaw === undefined ||
+            outDateRaw === null ||
+            outDateRaw === "" ||
+            Number(outDateRaw) < 45000
+        ) {
+            csvRow[9] = getLastDateOfPreviousMonth();
+        } else {
+            csvRow[9] = formatExcelDate(outDateRaw);
+        }
+
+
+        // =========================
+        // CHARGES
+        // =========================
+
+        csvRow[10] = row[10] ?? "";
+        csvRow[11] = row[9] ?? "";
+        csvRow[12] = row[4] || "";
+        csvRow[13] = row[5] || "";
+        csvRow[14] = row[6] || "";
+
+
+        // =========================
+        // INVOICE TOTAL
+        // =========================
+
+        const liftOn = parseFloat(row[10]) || 0;
+        const liftOff = parseFloat(row[9]) || 0;
+        const storage = parseFloat(row[6]) || 0;
+
+        csvRow[18] = liftOn + liftOff + storage;
+
+
+        // =========================
+        // SPLIT CONTAINER NUMBER
+        // =========================
+
+        let prefix = "";
+        let numberPart = "";
+
+        if (containerNumber) {
+            prefix = containerNumber.substring(0, 4);
+            numberPart = containerNumber.substring(4);
+        }
+
+        csvRow[23] = prefix;
+        csvRow[24] = numberPart;
+
+
+        // =========================
+        // EXCEL COLUMN M → CSV Z/AA
+        // =========================
+
+        let mValue = row[12] || "";
+
+        mValue = mValue.toString();
+
+        let firstTwoNumbers = "";
+        let remainingLetters = "";
+
+        const numMatch = mValue.match(/^(\d{2})/);
+
+        if (numMatch) {
+            firstTwoNumbers = numMatch[1];
+        }
+
+        const alphaMatch = mValue
+            .substring(2)
+            .match(/[A-Za-z]+/);
+
+        if (alphaMatch) {
+            remainingLetters = alphaMatch[0];
+        }
+
+        csvRow[25] = firstTwoNumbers;
+        csvRow[26] = remainingLetters;
+
+
+        // =========================
+        // REPLACEMENT RULES
+        // =========================
+
+        if (
+            csvRow[26] === "ST" ||
+            csvRow[26] === "HC" ||
+            csvRow[26] === "OT"
+        ) {
+            csvRow[26] = "DV";
+
+        } else if (csvRow[26] === "RF") {
+            csvRow[26] = "HR";
+        }
+
+
+        // =========================
+        // ADD ROW TO CSV
+        // =========================
+
+        csvContent += csvRow.join(",") + "\n";
+    });
+
+
+    // =========================
+    // DOWNLOAD CSV
+    // =========================
+
+    const blob = new Blob(
+        [csvContent],
+        { type: "text/csv;charset=utf-8;" }
+    );
+
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+
+    link.setAttribute("href", url);
+    link.setAttribute(
+        "download",
+        "invoice_template.csv"
+    );
+
+    document.body.appendChild(link);
+
+    link.click();
+
+    document.body.removeChild(link);
+
+    URL.revokeObjectURL(url);
+}
+</script>
+
+</body>
+</html>
