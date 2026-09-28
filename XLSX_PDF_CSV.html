@@ -297,6 +297,7 @@ function getLastDateOfPreviousMonth() {
 
 function generateCSV() {
 
+const CRLF = "\r\n";
     const headers = [
         "DOC TYPE",
         "INVOICE-NUMBER",
@@ -330,7 +331,8 @@ function generateCSV() {
         "NOTES"
     ];
 
-    let csvContent = headers.join(",") + "\n";
+    // Use Windows CRLF instead of LF
+    let csvContent = headers.join(",") + CRLF;
 
     let itemCounter = 1;
 
@@ -464,6 +466,7 @@ if (inDateRaw === undefined || inDateRaw === null || inDateRaw === "") {
         if (
             csvRow[26] === "ST" ||
             csvRow[26] === "HC" ||
+			csvRow[26] === "FR" ||
             csvRow[26] === "OT"
         ) {
             csvRow[26] = "DV";
@@ -477,36 +480,43 @@ if (inDateRaw === undefined || inDateRaw === null || inDateRaw === "") {
         // ADD ROW TO CSV
         // =========================
 
-        csvContent += csvRow.join(",") + "\n";
+        csvContent += csvRow.join(",") + CRLF;
     });
 
 
-    // =========================
-    // DOWNLOAD CSV
-    // =========================
+   // =========================
+// DOWNLOAD CSV
+// =========================
 
-    const blob = new Blob(
-        [csvContent],
-        { type: "text/csv;charset=utf-8;" }
-    );
+<!-- // 🔍 RAW ROW DEBUGGING (add this) -->
+<!-- const rows = csvContent.split("\n"); -->
+<!-- rows.forEach((row, index) => { -->
+    <!-- console.log(index, JSON.stringify(row)); -->
+<!-- }); -->
 
-    const url = URL.createObjectURL(blob);
+<!-- // Existing row logging -->
+<!-- console.log("CSV rows:"); -->
+<!-- rows.forEach((r, i) => { -->
+    <!-- console.log(`Row ${i}:`, r); -->
+<!-- }); -->
 
-    const link = document.createElement("a");
+const blob = new Blob(
+    [csvContent],
+    { type: "text/csv" }
+);
 
-    link.setAttribute("href", url);
-    link.setAttribute(
-        "download",
-        "invoice_template.csv"
-    );
+const url = URL.createObjectURL(blob);
 
-    document.body.appendChild(link);
+const link = document.createElement("a");
+link.setAttribute("href", url);
+link.setAttribute("download", "invoice_template.csv");
 
-    link.click();
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
 
-    document.body.removeChild(link);
+URL.revokeObjectURL(url);
 
-    URL.revokeObjectURL(url);
 }
 </script>
 
